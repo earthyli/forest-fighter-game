@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Forest Hunter</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { 
+            background: #222; 
+            display: block; 
+            margin: 0 auto; 
+            width: 100%; 
+            height: 100vh; 
+        }
+        
+        /* Menu styles */
+        #gameMenu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-image: url('game menu bg.png');
+            background-size: cover;
+            background-position: center;
+        }
+        
+        #gameTitle {
+            font-size: 64px;
+            color: #fff;
+            margin-bottom: 50px;
+            font-family: Arial, sans-serif;
+            text-shadow: 0 0 10px #4caf50;
+        }
+        
+        #startButton {
+            padding: 15px 40px;
+            font-size: 24px;
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        #startButton:hover {
+            background-color: #45a049;
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+<div id="gameMenu">
+    <h1 id="gameTitle">Forest Hunter</h1>
+    <button id="startButton">Start</button>
+</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const gameMenu = document.getElementById('gameMenu');
+const startButton = document.getElementById('startButton');
+
+// Set canvas to window size
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+// Call resize on load and whenever window is resized
+window.addEventListener('load', resizeCanvas);
+window.addEventListener('resize', resizeCanvas);
+
+// Add background music
+const bgMusic = new Audio('Electric Sky.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.5; // Set volume to 50%
+
+// Add boss music
+const bossMusic = new Audio('boss music.mp3');
+bossMusic.loop = true;
+bossMusic.volume = 0.5; // Set volume to 50%
+
+// Game state
+let gameStarted = false;
+
+// Add kill counter
+let kills = 0;
+
+// Start button event listener
+startButton.addEventListener('click', () => {
+    gameMenu.style.display = 'none';
+    gameStarted = true;
+    
+    // Start the music when game starts
+    bgMusic.play().catch(e => console.log("Audio play failed:", e));
+    
+    // Start the game loop
+    requestAnimationFrame(gameLoop);
+});
+
+const player = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    radius: 30,
+    speed: 3,
+    angle: 0
+};
+
+let bullets = [];
+let enemies = [];
+let keys = {};
+let mouse = { x: player.x, y: player.y };
+let gameOver = false;
+let hp = 10;
+let lastHp = 10;
+
+// Minimal weapon (shotgun style)
+const weapon = {
+    spread: 6,
+    spreadAngle: Math.PI / 4,
+    bulletSpeed: 8,
+    range: 200,
+    damage: 2,
+    color: "#ffeb3b"
+};
+
+document.addEventListener('keydown', e => {
+    keys[e.key.toLowerCase()] = true;
+});
+document.addEventListener('keyup', e => {
+    keys[e.key.toLowerCase()] = false;
+});
+
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+});
+
+canvas.addEventListener('mousedown', e => {
+    if (!gameStarted) return; // Don't shoot if game hasn't started
+    
+    const baseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    const spread = weapon.spread;
+    const spreadAngle = weapon.spreadAngle;
+    for (let i = 0; i < spread; i++) {
+        const angle = baseAngle - spreadAngle / 2 + (spreadAngle / (spread - 1)) * i;
+        bullets.push({
+            x: player.x,
+            y: player.y,
+            angle: angle,
+            speed: weapon.bulletSpeed,
+            radius: 5,
+            range: weapon.range,
+            traveled: 0,
+            damage: weapon.damage,
+            color: weapon.color
+        });
+    }
+});
+
+function movePlayer() {
+    if (!gameStarted) return; // Don't move if game hasn't started
+    
+    let currentSpeed = player.speed;
+    if (keys['w']) player.y -= currentSpeed;
+    if (keys['s']) player.y += currentSpeed;
+    if (keys['a']) player.x -= currentSpeed;
+    if (keys['d']) player.x += currentSpeed;
+    player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
+    player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+    player.angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+}
+
+function updateBullets() {
+    bullets = bullets.filter(bullet =>
+        bullet.x > 0 && bullet.x < canvas.width &&
+        bullet.y > 0 && bullet.y < canvas.height &&
+        bullet.traveled < bullet.range
+    );
+    for (let bullet of bullets) {
+        bullet.x += Math.cos(bullet.angle) * bullet.speed;
+        bullet.y += Math.sin(bullet.angle) * bullet.speed;
+        bullet.traveled += bullet.speed;
+    }
+}
+
+// Load player image
+const playerImg = new Image();
+playerImg.src = "player.png";
+
+function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    // Draw the player image centered at (0,0)
+    if (playerImg.complete && playerImg.naturalWidth !== 0) {
+        ctx.drawImage(playerImg, -player.radius, -player.radius, player.radius * 2, player.radius * 2);
+    } else {
+        // Fallback: draw a circle if image not loaded
+        ctx.beginPath();
+        ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#4caf50';
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawBullets() {
+    for (let bullet of bullets) {
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+        ctx.fillStyle = bullet.color;
+        ctx.fill();
+    }
+}
+
+function spawnEnemy() {
+    // Don't spawn regular enemies during boss battle or warning
+    if (bossActive || bossEntering || bossWarning) return;
+    
+    let edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0) { x = Math.random() * canvas.width; y = 0; }
+    else if (edge === 1) { x = Math.random() * canvas.width; y = canvas.height; }
+    else if (edge === 2) { x = 0; y = Math.random() * canvas.height; }
+    else { x = canvas.width; y = Math.random() * canvas.height; }
+    
+    // Increase enemy speed based on difficulty level
+    const baseSpeed = 2;
+    const speedIncrease = 0.3 * (difficultyLevel - 1);
+    const enemySpeed = baseSpeed + speedIncrease;
+    
+    enemies.push({
+        x: x,
+        y: y,
+        radius: 18,
+        speed: enemySpeed,
+        alive: true,
+        hp: 3
+    });
+}
+
+function updateEnemies() {
+    for (let enemy of enemies) {
+        let dx = player.x - enemy.x;
+        let dy = player.y - enemy.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist > 0) {
+            enemy.x += (dx / dist) * enemy.speed;
+            enemy.y += (dy / dist) * enemy.speed;
+        }
+    }
+    // Bullet collision
+    for (let bullet of bullets) {
+        for (let enemy of enemies) {
+            if (enemy.alive && Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y) < enemy.radius + bullet.radius) {
+                enemy.hp -= bullet.damage;
+                if (enemy.hp <= 0) {
+                    enemy.alive = false;
+                    kills++; // Increment kill counter when enemy is defeated
+                }
+                bullet.traveled = bullet.range;
+            }
+        }
+    }
+    // Player collision
+    for (let enemy of enemies) {
+        if (enemy.alive && Math.hypot(player.x - enemy.x, player.y - enemy.y) < player.radius + enemy.radius) {
+            enemy.alive = false;
+            hp -= 1; // Reduce HP by 1
+            if (hp <= 0) {
+                gameOver = true;
+            }
+        }
+    }
+    enemies = enemies.filter(e => e.alive);
+    
+    // Check if we should start boss warning
+    if (kills >= bossKillThreshold && !bossActive && !bossEntering && !bossWarning) {
+        bossWarning = true;
+        bossWarningTime = Date.now();
+        
+        // Fade out background music and start boss music
+        fadeOutMusic(bgMusic);
+        bossMusic.currentTime = 0;
+        bossMusic.play().catch(e => console.log("Boss music play failed:", e));
+    }
+    
+    // Check if warning time is over and we should start boss battle
+    if (bossWarning && Date.now() - bossWarningTime > 3000) { // 3 seconds warning
+        bossWarning = false;
+        bossEntering = true;
+        boss.y = -100; // Reset boss position
+        boss.hp = boss.maxHp; // Reset boss health
+        boss.alive = true;
+    }
+}
+
+// Load enemy image
+const enemyImg = new Image();
+enemyImg.src = "monster_001.png";
+
+function drawEnemies() {
+    for (let enemy of enemies) {
+        if (enemyImg.complete && enemyImg.naturalWidth !== 0) {
+            // Draw enemy image
+            ctx.save();
+            ctx.translate(enemy.x, enemy.y);
+            ctx.drawImage(enemyImg, -enemy.radius, -enemy.radius, enemy.radius * 2, enemy.radius * 2);
+            ctx.restore();
+        } else {
+            // Fallback: draw a circle if image not loaded
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#f44336';
+            ctx.fill();
+        }
+    }
+}
+
+// Add boss battle variables
+let bossActive = false;
+let bossEntering = false;
+let bossWarning = false;
+let bossWarningTime = 0;
+let bossKillThreshold = 30; // Initial threshold for boss appearance
+let difficultyLevel = 1; // Track the current difficulty level
+let boss = {
+    x: canvas.width / 2,
+    y: -100, // Start above the screen
+    radius: 100, // Doubled from 50 to 100
+    speed: 1,
+    hp: 50,
+    maxHp: 50,
+    alive: true,
+    lastShot: 0,
+    shootInterval: 2000 // Shoot every 2 seconds
+};
+
+// Add boss lasers array
+let bossLasers = [];
+
+// Load boss image
+const bossImg = new Image();
+bossImg.src = "boss.png"; // Changed from monster_001.png to boss.png
+
+function updateBoss() {
+    if (!bossActive && !bossEntering) return;
+    
+    if (bossEntering) {
+        // Move boss down until fully visible
+        boss.y += boss.speed;
+        if (boss.y > boss.radius) {
+            bossEntering = false;
+            bossActive = true;
+        }
+        return;
+    }
+    
+    // Boss movement - simple left-right pattern
+    boss.x += Math.sin(Date.now() / 1000) * 2;
+    
+    // Boss shooting
+    const currentTime = Date.now();
+    if (currentTime - boss.lastShot > boss.shootInterval) {
+        // Calculate angle to player
+        const angle = Math.atan2(player.y - boss.y, player.x - boss.x);
+        
+        // Create laser beam
+        bossLasers.push({
+            x: boss.x,
+            y: boss.y,
+            angle: angle,
+            speed: 5 + (difficultyLevel - 1), // Increase laser speed with difficulty
+            width: 10,
+            length: 30,
+            color: "#ff0000",
+            active: true
+        });
+        
+        boss.lastShot = currentTime;
+    }
+    
+    // Update boss lasers
+    updateBossLasers();
+    
+    // Bullet collision with boss
+    for (let bullet of bullets) {
+        if (Math.hypot(bullet.x - boss.x, bullet.y - boss.y) < boss.radius + bullet.radius) {
+            boss.hp -= bullet.damage;
+            bullet.traveled = bullet.range; // Remove the bullet
+            
+            if (boss.hp <= 0) {
+                boss.alive = false;
+                bossActive = false;
+                kills += 10; // Bonus kills for defeating the boss
+                bossKillThreshold = kills + 30; // Set next boss threshold to current kills + 30
+                
+                // Clear all boss lasers when boss is defeated
+                bossLasers = [];
+                
+                // Increase difficulty level after defeating a boss
+                difficultyLevel++;
+                
+                // Update boss stats for next encounter
+                boss.speed = 1 + (0.2 * (difficultyLevel - 1)); // Increase boss speed
+                boss.shootInterval = Math.max(800, 2000 - (200 * (difficultyLevel - 1))); // Decrease time between shots (min 800ms)
+                boss.hp = boss.maxHp = 50 + (10 * (difficultyLevel - 1)); // Increase boss HP
+                
+                // Switch back to background music
+                fadeOutMusic(bossMusic);
+                bgMusic.currentTime = 0;
+                bgMusic.play().catch(e => console.log("Background music play failed:", e));
+            }
+        }
+    }
+    
+    // Player collision with boss
+    if (Math.hypot(player.x - boss.x, player.y - boss.y) < player.radius + boss.radius) {
+        hp -= 2; // Boss does more damage
+        if (hp <= 0) {
+            gameOver = true;
+        }
+    }
+}
+
+function updateBossLasers() {
+    // Move lasers
+    for (let laser of bossLasers) {
+        laser.x += Math.cos(laser.angle) * laser.speed;
+        laser.y += Math.sin(laser.angle) * laser.speed;
+        
+        // Check if laser is out of bounds
+        if (laser.x < 0 || laser.x > canvas.width || 
+            laser.y < 0 || laser.y > canvas.height) {
+            laser.active = false;
+        }
+        
+        // Check collision with player
+        const dx = player.x - laser.x;
+        const dy = player.y - laser.y;
+        const distance = Math.hypot(dx, dy);
+        
+        if (distance < player.radius + laser.width/2) {
+            hp -= 1; // Laser does 1 damage
+            laser.active = false;
+            
+            if (hp <= 0) {
+                gameOver = true;
+            }
+        }
+    }
+    
+    // Remove inactive lasers
+    bossLasers = bossLasers.filter(laser => laser.active);
+}
+
+function drawBossLasers() {
+    for (let laser of bossLasers) {
+        ctx.save();
+        ctx.translate(laser.x, laser.y);
+        ctx.rotate(laser.angle);
+        
+        // Draw laser beam
+        ctx.fillStyle = laser.color;
+        ctx.fillRect(-laser.length/2, -laser.width/2, laser.length, laser.width);
+        
+        ctx.restore();
+    }
+}
+
+function drawBoss() {
+    if (!bossEntering && !bossActive) return;
+    
+    if (bossImg.complete && bossImg.naturalWidth !== 0) {
+        // Draw boss image
+        ctx.save();
+        ctx.translate(boss.x, boss.y);
+        ctx.drawImage(bossImg, -boss.radius, -boss.radius, boss.radius * 2, boss.radius * 2);
+        ctx.restore();
+    } else {
+        // Fallback: draw a circle if image not loaded
+        ctx.beginPath();
+        ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff0000';
+        ctx.fill();
+    }
+    
+    // Draw boss health bar
+    const barWidth = boss.radius * 2;
+    const barHeight = 10;
+    const x = boss.x - boss.radius;
+    const y = boss.y - boss.radius - 20;
+    
+    // Background of the bar
+    ctx.fillStyle = "#444";
+    ctx.fillRect(x, y, barWidth, barHeight);
+    
+    // HP portion (red)
+    ctx.fillStyle = "#ff0000";
+    ctx.fillRect(x, y, barWidth * (boss.hp / boss.maxHp), barHeight);
+    
+    // Border
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, barWidth, barHeight);
+}
+
+// Load background image
+const bgImg = new Image();
+bgImg.src = "background.png";
+
+function gameLoop(timestamp) {
+    if (gameOver) {
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = "#222";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#fff";
+        ctx.font = "48px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("Game Over", canvas.width / 2, 300);
+        
+        // Draw restart button
+        const buttonWidth = 200;
+        const buttonHeight = 50;
+        const buttonX = canvas.width / 2 - buttonWidth / 2;
+        const buttonY = 350;
+        
+        // Draw button background
+        ctx.fillStyle = "#4caf50";
+        ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+        
+        // Draw button text
+        ctx.fillStyle = "#fff";
+        ctx.font = "24px Arial";
+        ctx.fillText("Restart Game", canvas.width / 2, buttonY + buttonHeight / 2 + 8);
+        
+        // Check if restart button is clicked
+        canvas.onclick = function(e) {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            if (mouseX >= buttonX && mouseX <= buttonX + buttonWidth &&
+                mouseY >= buttonY && mouseY <= buttonY + buttonHeight) {
+                // Reset game state
+                resetGame();
+            }
+        };
+        
+        ctx.restore();
+        bgMusic.pause(); // Stop music when game over
+        bossMusic.pause(); // Also stop boss music when game over
+        return;
+    }
+
+    // Draw background image if loaded, otherwise clear
+    if (bgImg.complete && bgImg.naturalWidth !== 0) {
+        ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    if (gameStarted) {
+        movePlayer();
+        updateBullets();
+        updateEnemies();
+        updateBoss(); // This now includes updating boss lasers
+        drawPlayer();
+        drawBullets();
+        drawEnemies();
+        drawBossLasers(); // Draw boss lasers
+        drawBoss(); // Add boss drawing
+        drawWarningMessage(); // Draw warning message
+        
+        // Draw HP bar
+        const barWidth = 200;
+        const barHeight = 20;
+        const x = 20;
+        const y = 20;
+        
+        // Background of the bar
+        ctx.fillStyle = "#444";
+        ctx.fillRect(x, y, barWidth, barHeight);
+        
+        // HP portion (green)
+        ctx.fillStyle = "#4caf50";
+        ctx.fillRect(x, y, barWidth * (hp / 10), barHeight);
+        
+        // Border
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, barWidth, barHeight);
+        
+        // HP text
+        ctx.fillStyle = "#fff";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("HP: " + hp, x + barWidth / 2, y + barHeight / 2 + 5);
+        
+        // Draw Boss HP bar (only during boss battle)
+        if (bossActive || bossEntering) {
+            const bossBarY = y + barHeight + 10; // Position below player HP bar
+            
+            // Background of the boss bar
+            ctx.fillStyle = "#444";
+            ctx.fillRect(x, bossBarY, barWidth, barHeight);
+            
+            // Boss HP portion (red)
+            ctx.fillStyle = "#ff0000";
+            ctx.fillRect(x, bossBarY, barWidth * (boss.hp / boss.maxHp), barHeight);
+            
+            // Border
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, bossBarY, barWidth, barHeight);
+            
+            // Boss HP text
+            ctx.fillStyle = "#fff";
+            ctx.font = "16px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("Boss HP: " + boss.hp, x + barWidth / 2, bossBarY + barHeight / 2 + 5);
+        }
+        
+        // Draw kill counter
+        ctx.fillStyle = "#fff";
+        ctx.font = "20px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText("Kills: " + kills, canvas.width - 20, 35);
+        
+        // Spawn enemy every 1 second (if not in boss battle)
+        if (timestamp - lastEnemySpawn > 1000 && !bossActive && !bossEntering) {
+            spawnEnemy();
+            lastEnemySpawn = timestamp;
+        }
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Initialize lastEnemySpawn but don't start the game loop yet
+let lastEnemySpawn = 0;
+
+function drawWarningMessage() {
+    if (!bossWarning) return;
+    
+    ctx.save();
+    
+    // Flashing effect - alternate between red and yellow
+    const flashSpeed = 500; // ms
+    const isRed = Math.floor((Date.now() - bossWarningTime) / flashSpeed) % 2 === 0;
+    
+    ctx.fillStyle = isRed ? "#ff0000" : "#ffff00";
+    ctx.font = "bold 36px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    
+    // Add shadow for better visibility
+    ctx.shadowColor = "black";
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    // Draw the warning text
+    ctx.fillText("WARNING!! WARNING!!", canvas.width / 2, canvas.height / 2 - 20);
+    ctx.fillText("HUGE FIGURE APPROACHING!!", canvas.width / 2, canvas.height / 2 + 20);
+    
+    ctx.restore();
+}
+
+// Add music fading function
+function fadeOutMusic(audio) {
+    if (!audio.paused) {
+        const fadeInterval = setInterval(() => {
+            if (audio.volume > 0.1) {
+                audio.volume -= 0.1;
+            } else {
+                audio.pause();
+                audio.volume = 0.5; // Reset volume for next play
+                clearInterval(fadeInterval);
+            }
+        }, 100);
+    }
+}
+
+// Add reset game function
+function resetGame() {
+    // Reset game variables
+    gameOver = false;
+    gameStarted = false;
+    hp = 10;
+    kills = 0;
+    enemies = [];
+    bullets = [];
+    bossLasers = [];
+    bossActive = false;
+    bossEntering = false;
+    bossWarning = false;
+    difficultyLevel = 1;
+    bossKillThreshold = 30;
+    
+    // Reset boss
+    boss.x = canvas.width / 2;
+    boss.y = -100;
+    boss.hp = 50;
+    boss.maxHp = 50;
+    boss.speed = 1;
+    boss.shootInterval = 2000;
+    
+    // Reset player position
+    player.x = canvas.width / 2;
+    player.y = canvas.height / 2;
+    
+    // Remove click handler
+    canvas.onclick = null;
+    
+    // Show menu again
+    gameMenu.style.display = 'flex';
+}
+
+// The game loop will be started when the Start button is clicked
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
