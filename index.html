@@ -120,6 +120,11 @@ let gameOver = false;
 let hp = 10;
 let lastHp = 10;
 
+// Touch state for movement
+let touchActive = false;
+let touchX = 0;
+let touchY = 0;
+
 // Minimal weapon (shotgun style)
 const weapon = {
     spread: 6,
@@ -146,6 +151,7 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => {
     if (!gameStarted) return; // Don't shoot if game hasn't started
     
+    // Use mouse.x and mouse.y which are already updated by mousemove
     const baseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
     const spread = weapon.spread;
     const spreadAngle = weapon.spreadAngle;
@@ -165,16 +171,93 @@ canvas.addEventListener('mousedown', e => {
     }
 });
 
+// Touch event listeners
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault(); // Prevent default browser actions (like scrolling)
+    if (!gameStarted) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0]; // Get the first touch
+    touchX = touch.clientX - rect.left;
+    touchY = touch.clientY - rect.top;
+    touchActive = true;
+
+    // Treat the first touch also as a potential aim/shoot action
+    // This allows tap-to-shoot
+    mouse.x = touchX;
+    mouse.y = touchY;
+
+    // Perform shooting logic (same as mousedown)
+    const baseAngle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    const spread = weapon.spread;
+    const spreadAngle = weapon.spreadAngle;
+    for (let i = 0; i < spread; i++) {
+        const angle = baseAngle - spreadAngle / 2 + (spreadAngle / (spread - 1)) * i;
+        bullets.push({
+            x: player.x,
+            y: player.y,
+            angle: angle,
+            speed: weapon.bulletSpeed,
+            radius: 5,
+            range: weapon.range,
+            traveled: 0,
+            damage: weapon.damage,
+            color: weapon.color
+        });
+    }
+}, { passive: false }); // passive: false to allow preventDefault
+
+canvas.addEventListener('touchmove', e => {
+    e.preventDefault(); // Prevent default browser actions
+    if (!gameStarted || !touchActive) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    touchX = touch.clientX - rect.left;
+    touchY = touch.clientY - rect.top;
+
+    // Update mouse position for aiming if desired, or keep separate logic for touch move
+    mouse.x = touchX; 
+    mouse.y = touchY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault(); // Prevent default browser actions
+    if (!gameStarted) return;
+    // Check if all touches are released
+    if (e.touches.length === 0) {
+        touchActive = false;
+    }
+}, { passive: false });
+
 function movePlayer() {
     if (!gameStarted) return; // Don't move if game hasn't started
     
     let currentSpeed = player.speed;
+
+    // Keyboard movement
     if (keys['w']) player.y -= currentSpeed;
     if (keys['s']) player.y += currentSpeed;
     if (keys['a']) player.x -= currentSpeed;
     if (keys['d']) player.x += currentSpeed;
+
+    // Touch movement
+    if (touchActive) {
+        const dx = touchX - player.x;
+        const dy = touchY - player.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Move towards the touch point if it's further than a small threshold
+        if (distance > player.radius / 2) { // Only move if touch is a bit away
+            player.x += (dx / distance) * currentSpeed;
+            player.y += (dy / distance) * currentSpeed;
+        }
+    }
+
     player.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.x));
     player.y = Math.max(player.radius, Math.min(canvas.height - player.radius, player.y));
+    
+    // Player angle should still follow mouse/touch for aiming
     player.angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
 }
 
